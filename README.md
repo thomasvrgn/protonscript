@@ -29,3 +29,22 @@ function main() {
 - **Statically typed** for safe and clean programming
 - **Javascript inheritance** for simple and rapid prototyping.
 - **Compilation step** for almost native performances
+
+## How to build Protonscript
+### Requirements
+- GCC or CLang compiler
+- Cabal 3.0
+- GHC 9.4.2
+
+### Build from sources
+```bash
+$ git clone https://github.com/thomasvergne/protonscript.git
+$ cd protonscript
+$ cabal install # install in path
+```
+
+## How to use Protonscript
+### Compile a file
+```bash
+$ protonscript compile <file>
+```
