@@ -188,7 +188,6 @@ module Core.Transformation.Monomorphization where
     s <- get
     (xs', _, lambdas) <- runRWST (mapM monoStatement xs) () s
     put s
-    traceShowM lambdas
     return $ EBlock (concatMap (\case
       (TAssignment n e :>: pos') -> [SAssignment n e :>: pos']
       _ -> []) lambdas ++ xs') :>: pos
@@ -196,7 +195,6 @@ module Core.Transformation.Monomorphization where
     findToplevelAssignment n >>= \case
       Just (TFunction _ ret name args body :>: pos') -> do
         let ty = map (snd . unannotate) args :-> ret
-        traceShowM (t, ty)
         mguM t ty >>= \case
           Left err -> error err
           Right s -> do
