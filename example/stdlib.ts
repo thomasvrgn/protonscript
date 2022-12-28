@@ -1,0 +1,1 @@
+export declare function malloc<T>(size: number): Ref<T>;
