@@ -32,19 +32,19 @@ module Core.Compiler.Compiler where
     = modify $ \s -> s { declarations = name : declarations s }
 
   fromType :: MonadCompiler m => Type -> m CType
-  fromType  Int = return "int"
-  fromType  Bool = return "bool"
-  fromType  Float = return "float"
-  fromType  Char = return "char"
-  fromType  Void = return "void"
-  fromType  (TId n) = return $ "struct " ++ n
+  fromType Int = return "int"
+  fromType Bool = return "bool"
+  fromType Float = return "float"
+  fromType Char = return "char"
+  fromType Void = return "void"
+  fromType (TId n) = return $ "struct " ++ n
   fromType (args :-> ret) = do
     name <- freshTypeName
     args' <- mapM fromType args
     ret' <- fromType ret
     addDeclaration $ "typedef " ++ ret' ++ "(*" ++ name ++ ")(" ++ intercalate "," args' ++ ");"
-    return name
     -- return $ "std::function<" ++ ret' ++ "(" ++ intercalate "," args' ++ ")>"
+    return name
   fromType (TVar _) = return "void*"
   fromType (TRec _) = error "Should not happen"
   fromType (TPtr t) = (++"*") <$> fromType t
@@ -55,6 +55,7 @@ module Core.Compiler.Compiler where
     ret' <- fromType ret
     args' <- mapM (\(x :@ t) -> (x :@) <$> fromType t) args
     body' <- mapM compileStatement body
+    modify $ \s -> s { functions = name : functions s }
     return $ TFunction annots ret' name args' body' :>: pos
   compileToplevel (TAssignment (name :@ t) expr :>: pos) = do
     t' <- fromType t
@@ -165,13 +166,13 @@ module Core.Compiler.Compiler where
   compileExpression (ESizeOf t :>: pos) = do
     t' <- fromType t
     return $ ESizeOf t' :>: pos
-  compileExpression z@(ELambda _ ret args body :>: pos) = do
-    ret' <- fromType ret
-    args' <- mapM (\(x :@ t) -> (x :@) <$> fromType t) args
-    body' <- compileExpression body
-    funs <- gets functions
-    let env = M.keys (free z) \\ funs
-    return $ ELambda env ret' args' body' :>: pos
+  -- compileExpression z@(ELambda _ ret args body :>: pos) = do
+  --   ret' <- fromType ret
+  --   args' <- mapM (\(x :@ t) -> (x :@) <$> fromType t) args
+  --   body' <- compileExpression body
+  --   funs <- gets functions
+  --   let env = M.keys (free z) \\ funs
+  --   return $ ELambda env ret' args' body' :>: pos
   compileExpression _ = error "Should not happen"
 
   compile :: Monad m => [Located (Toplevel Type)] -> m ([String], [ToplevelIR])

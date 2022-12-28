@@ -76,7 +76,6 @@ module Core.Compiler.Generation where
   --   let body' = generateExpression body
   --   let args' = map (\(n :@ t) -> t ++ " " ++ n) args
   --   "[" ++ intercalate ", " free' ++ "](" ++ intercalate ", " args' ++ ") -> " ++ ret ++ " {\n return " ++ body' ++ "; \n}"
-  generateExpression (ELambda _ _ _ _ :>: _) = error "not supported yet"
   generateExpression (EStructureAccess x y :>: _) = do
     let x' = generateExpression x
     x' ++ "." ++ y
