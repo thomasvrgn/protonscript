@@ -12,7 +12,6 @@ module Core.Transformation.Monomorphization where
   import Data.List
   import Core.Checker.Checker
   import Data.Either
-  import Debug.Trace
   import Data.Maybe
 
   data MonoState = MonoState {
@@ -22,7 +21,7 @@ module Core.Transformation.Monomorphization where
     result :: M.Map String (Maybe (Located (Toplevel Type))),
     tAssignments :: [Located (Toplevel Type)]
   }
-  type MonadMono m = (MonadRWS () [Located (Toplevel Type)] MonoState m)
+  type MonadMono m = (MonadRWS () [Located (Toplevel Type)] MonoState m, MonadIO m)
 
   addInterface :: MonadMono m => Type -> Located (Toplevel Type) -> m ()
   addInterface t toplevel = do
@@ -220,7 +219,7 @@ module Core.Transformation.Monomorphization where
     return $ ELetIn name expr' body' :>: pos
   monoExpression x = return x
     
-  lookupMgu :: Monad m => Type -> M.Map Type a -> m (Maybe (Type, a))
+  lookupMgu :: MonadIO m => Type -> M.Map Type a -> m (Maybe (Type, a))
   lookupMgu t c = do
     M.toList <$> filterWithKeyM (\k _ -> isRight <$> mguM k t) c >>= \case
       [] -> return Nothing
@@ -239,7 +238,7 @@ module Core.Transformation.Monomorphization where
   showTy (TId s) = s
   showTy (TApp s args) = showTy s ++ "_" ++ showTy args
 
-  mguM :: Monad m => Type -> Type -> m (Either String Substitution)
+  mguM :: MonadIO m => Type -> Type -> m (Either String Substitution)
   mguM t1 t2 = do
     res <- runExceptT $ runRWST (mgu M.empty t1 t2) M.empty (TypeState 0 M.empty (M.empty, M.empty))
     case res of
@@ -263,7 +262,7 @@ module Core.Transformation.Monomorphization where
     (TDeclaration _ :>: _) -> True
     _ -> False)
 
-  runMono :: Monad m => [Located (Toplevel Type)] -> m [Located (Toplevel Type)]
+  runMono :: MonadIO m => [Located (Toplevel Type)] -> m [Located (Toplevel Type)]
   runMono xs = do
     (xs', MonoState _ _ _ res _, _) <- runRWST monomorphizeMain () (MonoState M.empty M.empty M.empty M.empty xs)
     let lambdas' = catMaybes $ M.elems res
