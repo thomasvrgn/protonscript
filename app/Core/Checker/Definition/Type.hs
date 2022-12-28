@@ -17,7 +17,7 @@ module Core.Checker.Definition.Type where
   type Env = (TypeEnv, ConsEnv)
 
   -- Bool indicates whether the type is public or not
-  data Scheme = Forall Bool [Int] Type
+  data Scheme = Forall Bool Bool [Int] Type
     deriving (Eq, Ord, Show)
 
   instance Show Type where

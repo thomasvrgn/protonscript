@@ -43,8 +43,8 @@ module Core.Checker.Definition.Methods where
     apply = M.map . apply
 
   instance Types Scheme where
-    free (Forall _ v t) = free t S.\\ S.fromList (map show v)
-    apply s (Forall p v t) = Forall p v (apply (foldr M.delete s v) t)
+    free (Forall _ _ v t) = free t S.\\ S.fromList (map show v)
+    apply s (Forall m p v t) = Forall m p v (apply (foldr M.delete s v) t)
     
   instance Types a => Types (Maybe a) where
     free = maybe S.empty free

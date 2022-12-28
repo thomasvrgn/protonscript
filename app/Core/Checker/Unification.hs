@@ -8,22 +8,22 @@ module Core.Checker.Unification where
   import qualified Data.Map as M
   import Core.Checker.Definition.Methods (compose)
   import Data.List (delete, union)
-  import Core.Parser.AST.Expression (Statement)
-  import Core.Parser.AST.Literal (Position)
+  import Core.Parser.AST.Expression
+  import Core.Parser.AST.Literal
   import Data.These (These(These, This, That))
   import Data.Semialign.Indexed (SemialignWithIndex(ialignWith))
   import Data.Foldable.Extra (foldlM)
   import Data.Either (isRight)
 
   type ReaderEnv = M.Map String Type
-  data Module = Module String [Statement Type]
+  data Module = Module String [Located (Toplevel Type)]
     deriving Show
   data TypeState = TypeState {
     counter :: Int,
     modules :: M.Map String Module,
     env :: Env
   } deriving Show
-  type MonadType m = (MonadRWS ReaderEnv () TypeState m, MonadError (String, Maybe String, Position) m)
+  type MonadType m = (MonadRWS ReaderEnv () TypeState m, MonadError (String, Maybe String, Position) m, MonadIO m)
   
   variable :: Int -> Type -> Either String Substitution
   variable n t
@@ -63,7 +63,7 @@ module Core.Checker.Unification where
       xs -> return $ Just $ head xs
 
   tyInstantiate :: MonadType m => Scheme -> m Type
-  tyInstantiate (Forall _ vars t) = do
+  tyInstantiate (Forall _ _ vars t) = do
     vars' <- mapM (const fresh) vars
     let s = M.fromList $ zip vars vars'
       in return $ apply s t  

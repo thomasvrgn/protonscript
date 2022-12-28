@@ -16,13 +16,15 @@ module Core.Checker.Checker where
   import qualified Data.Bifunctor as B
   import Data.Foldable.Extra (foldlM)
   import Data.Maybe
+  import System.FilePath
+  import System.Directory
+  import Core.Parser.Parser hiding (buildFun)
+  import Core.Error
+  import System.Exit
 
-  generalize :: Env -> Bool -> Type -> Scheme
-  generalize (env, _) p t = Forall p (map read $ S.toList vars) t
+  generalize :: Env -> Bool -> Bool -> Type -> Scheme
+  generalize (env, _) m p t = Forall m p (map read $ S.toList vars) t
     where vars = free t S.\\ free env
-
-  addModule :: MonadType m => String -> [Statement Type] -> m ()
-  addModule n stmts = modify $ \c -> c { modules = M.insert n (Module n stmts) (modules c) }
 
   unannotate :: Annoted a b -> (a, b)
   unannotate (x :@ t) = (x, t)
@@ -60,14 +62,14 @@ module Core.Checker.Checker where
     DCast _ -> return Void
 
   applyForall :: Substitution -> Scheme -> Scheme
-  applyForall s (Forall p tvs t) = Forall p tvs $ apply s t
+  applyForall s (Forall m p tvs t) = Forall m p tvs $ apply s t
   
   inferE :: Infer Expression m
   inferE (EVariable n _ casts :>: pos) = do
     (env, c) <- gets env
     case M.lookup n env of
       Nothing -> throwError ("Variable " ++ n ++ " not found", Nothing, pos)
-      Just t@(Forall _ tvs t') -> do
+      Just t@(Forall _ _ tvs t') -> do
         map' <- ask
         let cast = catMaybes casts
         cast' <- mapM (map' `fromDeclaration`) cast
@@ -102,7 +104,7 @@ module Core.Checker.Checker where
       (t', s', a') <- local (apply s) $ inferE x
       return (t ++ [t'], s' `compose` s, a ++ [a'])) ([], s1, []) xs
     (_, c) <- gets env
-
+    
     s'' <- mgu c (t2 :-> tv) (apply s2 t1)
     case s'' of
       Right s3 -> do
@@ -119,7 +121,7 @@ module Core.Checker.Checker where
       Nothing -> fresh)) args
     (env, c) <- gets env
     let env'  = foldl (flip M.delete) env $ map fst args'
-        env'' = env' `M.union` M.fromList (zipWith (\x t -> (x, Forall False [] t)) (map fst args') (map snd args'))
+        env'' = env' `M.union` M.fromList (zipWith (\x t -> (x, Forall False False [] t)) (map fst args') (map snd args'))
     (t, s, e') <- RWS.local (`M.union` map') $ local (B.first $ M.union env'') $ inferE e
     mgu c ret' t >>= \case
       Right s' -> do
@@ -232,19 +234,19 @@ module Core.Checker.Checker where
     t <- fromDeclaration env e'
     return (Int, M.empty, ESizeOf t :>: pos)
 
-  inferVariable :: MonadType m => Bool -> String -> Maybe Declaration -> Located (Expression (Maybe Declaration)) -> Position -> m (Type, Substitution, Annoted String Type, Located (Expression Type))
-  inferVariable isMutable name ty value pos = do
+  inferVariable :: MonadType m => Bool -> Bool -> String -> Maybe Declaration -> Located (Expression (Maybe Declaration)) -> Position -> m (Type, Substitution, Annoted String Type, Located (Expression Type))
+  inferVariable isMutable public name ty value pos = do
     -- Fresh type for recursive definitions
     map' <- ask
     e@(env', cons) <- gets env
     (tv, e') <- case ty of
       Just t -> do
-        t' <- generalize e False <$> fromDeclaration map' t 
+        t' <- generalize e False public <$> fromDeclaration map' t 
         t'' <- tyInstantiate t'
-        return (t'', M.singleton name (Forall False [] t''))
+        return (t'', M.singleton name (Forall False public [] t''))
       Nothing -> do
         tv <- fresh
-        return (tv, M.singleton name (Forall False [] tv))
+        return (tv, M.singleton name (Forall False public [] tv))
     (t1, s1, v1) <- local (B.first (`M.union` e')) $ inferE value
 
     s' <- mgu cons (apply s1 tv) t1 >>= \case
@@ -254,7 +256,7 @@ module Core.Checker.Checker where
       Left x -> throwError (x, Nothing, pos)
 
     let env''  = M.delete name env'
-        t'     = Forall isMutable [] (apply s' tv)
+        t'     = Forall isMutable public [] (apply s' tv)
         env''' = M.insert name t' env''
     modify $ \env -> env { env = (env''', cons) }
     return (Void, s', (name :@ apply s' tv), (apply s' v1))
@@ -278,11 +280,11 @@ module Core.Checker.Checker where
     (EBlock xs' :>: p1) -> EBlock (createCastReturn t xs') :>: p1
     _ -> xs
 
-  inferT :: Infer Toplevel m
-  inferT (TAssignment (name :@ ty) value :>: pos) = do
-    (t, s, n, v) <- inferVariable True name ty value pos
+  inferT ::  MonadType m => (String, Bool) -> Located (Toplevel (Maybe Declaration)) -> m (Type, Substitution, Located (Toplevel Type))
+  inferT (_, p) (TAssignment (name :@ ty) value :>: pos) = do
+    (t, s, n, v) <- inferVariable True p name ty value pos
     return (t, s, TAssignment n v :>: pos)
-  inferT (TFunction annot ret name args body :>: pos) = do
+  inferT (_, p) (TFunction annot ret name args body :>: pos) = do
     annot' <- mapM (const fresh) annot
     let map' = M.fromList $ zip annot annot'
     ret' <- case ret of
@@ -293,7 +295,7 @@ module Core.Checker.Checker where
       Nothing -> fresh)) args
     (env', c) <- gets env
     let env1  = foldl (flip M.delete) env' $ map fst args'
-        env2 = env1 `M.union` M.fromList (zipWith (\x t -> (x, Forall False [] t)) (map fst args') (map snd args')) `M.union` M.singleton name (Forall False [] ((map snd args') :-> ret'))
+        env2 = env1 `M.union` M.fromList (zipWith (\x t -> (x, Forall False False [] t)) (map fst args') (map snd args')) `M.union` M.singleton name (Forall False p [] ((map snd args') :-> ret'))
     (t, s, body') <- unzip3 <$> (RWS.local (`M.union` map') $ local (B.first $ M.union env2) $ mapM inferS body)
     let s' = foldl compose M.empty s
     let retT = case t of
@@ -305,30 +307,30 @@ module Core.Checker.Checker where
         let ret'' = apply s''' ret'
         let env1'  = M.delete name env1
             t'    = case apply s''' ret'' of
-                  TPtr _ -> Forall False [] (apply s''' $ map snd args' :-> ret'')
-                  _ -> generalize (applyEnv s''' (env1', c)) False (apply s''' $ map snd args' :-> ret'')
+                  TPtr _ -> Forall False p [] (apply s''' $ map snd args' :-> ret'')
+                  _ -> generalize (applyEnv s''' (env1', c)) False p (apply s''' $ map snd args' :-> ret'')
             env2' = M.insert name t' env1'
         modify $ \env -> env { env = (env2', c) }
         return (Void, s''', apply s''' $ TFunction annot ret'' name (zipWith (:@) (map fst args') (apply s''' $ map snd args')) (createCastReturn ret'' body') :>: pos)
       Left x -> throwError (x, Nothing, pos)
-  inferT (TConstant (name :@ ty) value :>: pos) = do
-    (t, s, n, v) <- inferVariable False name ty value pos
+  inferT (_, p) (TConstant (name :@ ty) value :>: pos) = do
+    (t, s, n, v) <- inferVariable False p name ty value pos
     return (t, s, TConstant n v :>: pos)
-  inferT (TDeclaration (name :@ t) :>: pos) = case t of
+  inferT (_, p) (TDeclaration (name :@ t) :>: pos) = case t of
     Nothing -> throwError ("No type for declaration", Nothing, pos)
     Just t' -> do
       e@(env', c) <- gets env
-      t1 <- generalize e False <$> fromDeclaration M.empty t'
+      t1 <- generalize e False p <$> fromDeclaration M.empty t'
       t2 <- tyInstantiate t1
       modify $ \env -> env { env = (M.insert name t1 env', c) }
       return (Void, M.empty, TDeclaration (name :@ t2) :>: pos)
-  inferT (TEnumeration name fields :>: pos) = do
+  inferT (_, p) (TEnumeration name fields :>: pos) = do
     (env', c) <- gets env
     let header = TId name
-    let c' = M.union c $ M.fromList $ map (\x -> (TId x, Forall False [] header)) fields
+    let c' = M.union c $ M.fromList $ map (\x -> (TId x, Forall False p [] header)) fields
     modify $ \env -> env { env = (env', c') }
     return (Void, M.empty, TEnumeration name fields :>: pos)
-  inferT (TStructure gen name fields :>: pos) = do
+  inferT (_, p) (TStructure gen name fields :>: pos) = do
     e@(env', c) <- gets env
     generic <- mapM (const fresh) gen
     -- Recreating a map mapping generic name to type
@@ -338,12 +340,37 @@ module Core.Checker.Checker where
     fields' <- mapM (\(x :@ t) -> 
       (x,) <$> fromDeclaration table (fromMaybe DVoid t)) fields
     let rec = [TRec fields'] :-> header
-    let fields'' = generalize e False rec
+    let fields'' = generalize e False p rec
     let c' = M.union c $ M.singleton header fields''
     modify $ \env -> env { env = (env', c') }
     return (Void, M.empty, TStructure gens name (map (uncurry (:@)) fields') :>: pos)
-  inferT (TType _ _ :>: pos) = throwError ("Type aliasing is not supported", Nothing, pos)
-  inferT (_ :>: pos) = throwError ("Not implemented yet", Nothing, pos)
+  inferT (dir, _) (TExport el :>: _) = inferT (dir, True) el
+  inferT (dir, _) (TImport meta path :>: pos) = do
+    let path' = dir </> path -<.> "ts"
+    liftIO (doesFileExist path') >>= \case
+      False -> throwError ("File " ++ path' ++ " not found", Nothing, pos)
+      True -> do
+        content <- liftIO $ readFile path'
+        (env', c) <- gets env
+        let ast = parseProton path' content
+        case ast of
+          Left err -> liftIO $ printParseError err path' >> exitFailure
+          Right ast' -> do
+            xs <- runInfer (takeDirectory path', False) ast'
+            case xs of
+              Left err -> throwError err
+              Right (TypeState _ _ (env2, c'), xs') -> do
+                let env3 = filterEnvIsPublic env2
+                let c2 = filterEnvIsPublic c'
+                let env4 = M.union env' env3
+                let c3 = M.union c c2
+                modify $ \env -> env { env = (env4, c3), modules = M.insert path' (Module path' xs') (modules env) }
+                return (Void, M.empty, TImport meta path :>: pos)
+  inferT _ (TType _ _ :>: pos) = throwError ("Type aliasing is not supported", Nothing, pos)
+  inferT _ (_ :>: pos) = throwError ("Not implemented yet", Nothing, pos)
+
+  filterEnvIsPublic :: M.Map a Scheme -> M.Map a Scheme
+  filterEnvIsPublic = M.map (\(Forall m _ tvs t) -> Forall m False tvs t) . M.filter (\(Forall _ t _ _) -> t)
 
   getModifiedType :: MonadType m => Located (Expression (Maybe Declaration)) -> m (String, Type)
   getModifiedType (EArrayAccess e _ :>: _) = getModifiedType e
@@ -352,7 +379,7 @@ module Core.Checker.Checker where
   getModifiedType (EVariable x _ _ :>: pos) = do
     (env, _) <- gets env
     case M.lookup x env of
-      Just (Forall _ _ t) -> return (x, t)
+      Just (Forall _ _ _ t) -> return (x, t)
       Nothing -> throwError ("Variable " ++ x ++ " not found", Nothing, pos)
   getModifiedType (_ :>: pos) = throwError ("Invalid expression", Nothing, pos)
 
@@ -410,7 +437,7 @@ module Core.Checker.Checker where
     (env, _) <- gets env
     case M.lookup n env of
       Nothing -> throwError ("Variable " ++ n ++ " not found", Nothing, pos)
-      Just (Forall mut _ t) -> do
+      Just (Forall mut _ _ t) -> do
         if mut 
           then return (t, M.empty, EVariable n t [] :>: pos, t)
           else
@@ -422,7 +449,7 @@ module Core.Checker.Checker where
     (t, s, e') <- local' $ inferE e
     return (t, s, SReturn e' :>: pos)
   inferS (SAssignment n e :>: pos) = do
-    inferT (TAssignment n e :>: pos) >>= \case
+    inferT ("", False) (TAssignment n e :>: pos) >>= \case
       (Void, s, TAssignment n' e' :>: pos') -> return (Void, s, SAssignment n' e' :>: pos')
       _ -> throwError ("Error that should not happen", Nothing, pos)
   inferS (SModified n expr :>: pos) = do
@@ -435,12 +462,12 @@ module Core.Checker.Checker where
       Right s3 -> do
         let s4 = s3 `compose` s1 `compose` s
         (env', _) <- gets env
-        let env'' = M.insert name (Forall True [] $ apply s4 tn') env'
+        let env'' = M.insert name (Forall True False [] $ apply s4 tn') env'
         modify $ \env -> env { env = (env'', c) }
         return (Void, s4, SModified n' (ECast t expr' :>: pos) :>: pos)
       Left x -> throwError (x, Nothing, pos)
   inferS (SConstant n e :>: pos) = 
-    inferT (TConstant n e :>: pos) >>= \case
+    inferT ("", False) (TConstant n e :>: pos) >>= \case
       (Void, s, TConstant n' e' :>: pos') -> return (Void, s, SConstant n' e' :>: pos')
       _ -> throwError ("Error that should not happen", Nothing, pos)
   inferS (SExpression e :>: pos) = do
@@ -470,27 +497,27 @@ module Core.Checker.Checker where
 
   functions :: TypeEnv
   functions = M.fromList [
-      ("+", Forall False [0] $ [TVar 0, TVar 0] :-> TVar 0),
-      ("null", Forall False [0] $ TPtr (TVar 0)),
-      ("printf", Forall False [] $ [TPtr Char] :-> Int),
-      ("==", Forall False [0] $ [TVar 0, TVar 0] :-> Bool),
-      ("!=", Forall False [0] $ [TVar 0, TVar 0] :-> Bool),
-      ("&&", Forall False [] $ [Bool, Bool] :-> Bool),
-      ("||", Forall False [] $ [Bool, Bool] :-> Bool),
-      ("!", Forall False [] $ [Bool] :-> Bool),
-      ("*", Forall False [0] $ [TVar 0, TVar 0] :-> TVar 0),
-      ("-", Forall False [0] $ [TVar 0, TVar 0] :-> TVar 0),
-      ("^", Forall False [0] $ [TVar 0, TVar 0] :-> TVar 0),
-      ("&", Forall False [0] $ [TVar 0, TVar 0] :-> TVar 0),
-      ("|", Forall False [0] $ [TVar 0, TVar 0] :-> TVar 0),
-      ("<<", Forall False [0] $ [TVar 0, TVar 0] :-> TVar 0),
-      (">>", Forall False [0] $ [TVar 0, TVar 0] :-> TVar 0),
-      ("~", Forall False [0] $ [TVar 0] :-> TVar 0)
+      ("+", Forall False True [0] $ [TVar 0, TVar 0] :-> TVar 0),
+      ("null", Forall False True [0] $ TPtr (TVar 0)),
+      ("printf", Forall False True [0] $ [TPtr Char, TVar 0] :-> Int),
+      ("==", Forall False True [0] $ [TVar 0, TVar 0] :-> Bool),
+      ("!=", Forall False True [0] $ [TVar 0, TVar 0] :-> Bool),
+      ("&&", Forall False True [] $ [Bool, Bool] :-> Bool),
+      ("||", Forall False True [] $ [Bool, Bool] :-> Bool),
+      ("!", Forall False True [] $ [Bool] :-> Bool),
+      ("*", Forall False True [0] $ [TVar 0, TVar 0] :-> TVar 0),
+      ("-", Forall False True [0] $ [TVar 0, TVar 0] :-> TVar 0),
+      ("^", Forall False True [0] $ [TVar 0, TVar 0] :-> TVar 0),
+      ("&", Forall False True [0] $ [TVar 0, TVar 0] :-> TVar 0),
+      ("|", Forall False True [0] $ [TVar 0, TVar 0] :-> TVar 0),
+      ("<<", Forall False True [0] $ [TVar 0, TVar 0] :-> TVar 0),
+      (">>", Forall False True [0] $ [TVar 0, TVar 0] :-> TVar 0),
+      ("~", Forall False True [0] $ [TVar 0] :-> TVar 0)
     ]
 
-  runInfer :: Monad m => [Located (Toplevel (Maybe Declaration))] -> m (Either (String, Maybe String, Position) (TypeState, [Located (Toplevel Type)]))
-  runInfer xs = do
-    x <- runExceptT $ runRWST (mapM inferT xs) M.empty (TypeState 0 M.empty (functions, M.empty))
+  runInfer :: MonadIO m => (String, Bool) -> [Located (Toplevel (Maybe Declaration))] -> m (Either (String, Maybe String, Position) (TypeState, [Located (Toplevel Type)]))
+  runInfer isImport xs = do
+    x <- runExceptT $ runRWST (mapM (inferT isImport) xs) M.empty (TypeState 0 M.empty (functions, M.empty))
     return ((\(xs', st, _) -> (st, map thd xs')) <$> x)
 
   thd :: (a, b, c) -> c
