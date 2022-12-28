@@ -28,6 +28,8 @@ module Core.Parser.Parser where
 
   topLevel :: Proton (Toplevel (Maybe Declaration))
   topLevel = choice [
+      tExport <?> "export statement",
+      tImport <?> "import statement",
       tConstant <?> "constant declaration",
       tDeclaration <?> "declaration",
       tAssignment <?> "assignment",
@@ -70,6 +72,23 @@ module Core.Parser.Parser where
     expr <- expression
     e <- getPosition
     return $ TAssignment (name :@ ty) expr :>: (s, e)
+  
+  tExport :: Proton (Toplevel (Maybe Declaration))
+  tExport = do
+    s <- getPosition
+    reserved "export"
+    name <- topLevel
+    e <- getPosition
+    return $ TExport name :>: (s, e)
+
+  tImport :: Proton (Toplevel (Maybe Declaration))
+  tImport = do
+    s <- getPosition
+    reserved "import"
+    meta <- iMeta
+    name <- Token.stringLiteral lexer
+    e <- getPosition
+    return $ TImport meta name :>: (s, e)
 
   tEnumeration :: Proton (Toplevel (Maybe Declaration))
   tEnumeration = do
@@ -122,6 +141,13 @@ module Core.Parser.Parser where
     e <- getPosition
     return $ TStructure generics name fields :>: (s, e)
 
+  iMeta :: Parser ImportMeta
+  iMeta = choice [
+      (reservedOp "*" >> return IAll) <* reserved "from",
+      (Token.braces lexer (commaSep identifier) <&> IOnly) <* reserved "from",
+      return INone
+    ]
+  
   {- STATEMENT PARSING -}
 
   statement :: Proton (Statement (Maybe Declaration))
@@ -237,7 +263,7 @@ module Core.Parser.Parser where
   expressionTerm = choice [
       eLiteral <?> "literal",
       eArrayLiteral <?> "array literal",
-      -- try eLambda <?> "anonymous function",
+      try eLambda <?> "anonymous function",
       try eStructureLiteral <?> "structure literal",
       eBlock,
       eSizeof <?> "type size",

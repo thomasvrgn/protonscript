@@ -8,7 +8,7 @@ module Core.Parser.AST.Expression where
     deriving (Eq, Functor, Foldable)
 
   instance Traversable (Annoted a) where
-    traverse f (a :@ b) = (:@) a <$> f b
+    traverse f (a :@ b) = (a:@) <$> f b
 
   instance (Show a, Show b) => Show (Annoted a b) where
     show (a :@ b) = show a ++ ": " ++ show b
@@ -44,9 +44,22 @@ module Core.Parser.AST.Expression where
     show DVoid = "void"
     show (DApp f x) = show f ++ "<" ++ show x ++ ">"
 
+  data ImportMeta
+    = IAll
+    | IOnly [String]
+    | INone
+    deriving Eq
+
+  instance Show ImportMeta where
+    show IAll = "*"
+    show (IOnly xs) = "{" ++ intercalate ", " xs ++ "}"
+    show INone = ""
+  
   -- 'a' represents the type of the expression
   data Toplevel a
     = TAssignment (Annoted String a) (Located (Expression a))
+    | TImport ImportMeta String
+    | TExport (Located (Toplevel a))
     | TDeclaration (Annoted String a)
     | TDeclarationFunction (Annoted String a) [a]
     | TEnumeration String [String]
@@ -58,10 +71,13 @@ module Core.Parser.AST.Expression where
   
   instance Show a => Show (Toplevel a) where
     show (TAssignment (name :@ t) expr) = bBlue "let " ++ name ++ " : " ++ show t ++ " = " ++ show expr
+    show (TImport INone path) = bBlue "import " ++ path
+    show (TImport meta path) = bBlue "import " ++ show meta ++ bBlue " from " ++ path
+    show (TExport t) = bBlue "export " ++ show t
     show (TDeclarationFunction (name :@ t) args) = bBlue "declare function " ++ name ++ "(" ++ intercalate ", " (map show args) ++ "): " ++ show t
     show (TDeclaration (name :@ t)) = bBlue "declare " ++ name ++ " : " ++ show t
     show (TEnumeration name xs) = bBlue "enum " ++ name ++ " = " ++ intercalate ", " xs
-    show (TFunction annots ret name args body) = bBlue "function " ++ name ++ showAnnots annots ++ "(" ++ intercalate ", " (map show args) ++ ")" ++ ": " ++ show ret ++ " { " ++ concatMap ((++"; ") . show) body ++ "}"
+    show (TFunction annots ret name args body) = bBlue "function " ++ name ++ showAnnots annots ++ "(" ++ intercalate ", " (map show args) ++ ")" ++ ": " ++ show ret ++ " {\n" ++ concatMap (("  "++) . (++";\n") . show) body ++ "}"
     show (TStructure gen name fields) = bBlue "interface " ++ name ++ showAnnots (map show gen) ++ " { " ++ intercalate ", " (map show fields) ++ " }"
     show (TType name t) = bBlue "type " ++ name ++ " = " ++ show t
     show (TConstant (name :@ t) expr) = bBlue "const " ++ name ++ " : " ++ show t ++ " = " ++ show expr
@@ -106,7 +122,7 @@ module Core.Parser.AST.Expression where
     deriving Eq
   
   instance Show a => Show (Expression a) where
-    show (EVariable name _ _) = {-"(" ++ show t' ++ ") " ++ -} bold name{- ++ showAnnots (map show t)-}
+    show (EVariable name t' _) = "(" ++ show t' ++ ") " ++ bold name{- ++ showAnnots (map show t)-}
     show (ECall f args _) = show f ++ "(" ++ intercalate ", " (map show args) ++ ")"
     show (ELiteral l) = show l
     show (ELambda annots ret args body) = showAnnots annots ++ "(" ++ intercalate ", " (map show args) ++ "): " ++ show ret ++ " => " ++ show body
