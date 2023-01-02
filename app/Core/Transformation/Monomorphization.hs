@@ -92,6 +92,24 @@ module Core.Transformation.Monomorphization where
                 return (TId name'')
           Left err -> error err
       _ -> return t
+  makeName t@(TId name) = do
+    findStructure name >>= \case
+      Just (TStructure annots name' fields :>: pos) -> do
+        let t' = buildFun annots (TId name')
+        mguM t t' >>= \case
+          Right subst -> do
+            let fields' = apply subst fields
+            results <- gets result
+            let name'' = showTy t
+            case M.lookup name'' results of
+              Just _ -> return $ TId name''
+              Nothing -> do
+                tell' name'' $ Nothing
+                fields'' <- mapM (\(x :@ t'') -> (x :@) <$> makeName t'') fields'
+                tell' name'' $ Just $ TStructure [] name'' fields'' :>: pos
+                return (TId name'')
+          Left err -> error err
+      _ -> return t
   makeName (TPtr t) = TPtr <$> makeName t
   makeName (args :-> ret) = (:->) <$> mapM makeName args <*> makeName ret
   makeName t = return t
@@ -170,13 +188,13 @@ module Core.Transformation.Monomorphization where
     x' <- monoExpression x
     t' <- makeName t
     return $ ECast t' x' :>: pos
-  monoExpression (ELambda annots ret args body :>: pos) = do
+  monoExpression (ELambda annots ret args body  t:>: pos) = do
     args' <- mapM (\(name :@ ty) -> do
       ty' <- makeName ty
       return (name :@ ty')) args
     ret' <- makeName ret
     body' <- monoExpression body
-    return $ ELambda annots ret' args' body' :>: pos
+    return $ ELambda annots ret' args' body' t :>: pos
   monoExpression (EReference x :>: pos) = do
     x' <- monoExpression x
     return $ EReference x' :>: pos
@@ -226,7 +244,7 @@ module Core.Transformation.Monomorphization where
       xs -> return . Just $ head xs
 
   showTy :: Type -> String
-  showTy (TVar i) = "t" ++ show i
+  showTy t@(TVar _) = error $ "Should not encounter type variables in monomorphization: " ++ show t
   showTy (t :-> u) = "fun_" ++ intercalate "_" (map showTy t) ++ "_" ++ showTy u
   showTy Int = "Int"
   showTy Void = "Void"
@@ -267,4 +285,10 @@ module Core.Transformation.Monomorphization where
     (xs', MonoState _ _ _ res _, _) <- runRWST monomorphizeMain () (MonoState M.empty M.empty M.empty M.empty xs)
     let lambdas' = catMaybes $ M.elems res
     let externs = getExtern xs
-    return (externs ++ lambdas' ++ [xs'])
+    let structures = filter (\case
+          (TStructure _ _ _ :>: _) -> True
+          _ -> False) lambdas'
+    let other = filter (\case
+          TStructure _ _ _ :>: _ -> False
+          _ -> True) lambdas'
+    return (externs ++ reverse structures ++ other ++ [xs'])
