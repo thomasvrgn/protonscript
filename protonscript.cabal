@@ -79,6 +79,8 @@ executable protonscript
       Core.Transformation.ANF
       Core.Transformation.Hoisting
       Core.Transformation.Monomorphization
+      Core.Transformation.ForwardRemover
+      Core.Transformation.ModuleRemover
 
       Core.Optimizer.GarbageCollector
 
@@ -101,6 +103,8 @@ executable protonscript
       , semialign
       , diagnose
       , extra
+      , filepath
+      , directory
     -- Directories containing source files.
     hs-source-dirs:   app
 
