@@ -47,7 +47,6 @@ module Main where
               Right (TypeState c modules _, res') -> do
                 res' <- bundle res' modules
                 (anfC, res') <- runANF res' 0
-                mapM_ print res'
                 (interfaces, res') <- runClosureConversion res' c
                 res' <- runHoisting res'
                 (_, res') <- runANF (reverse interfaces ++ res') anfC

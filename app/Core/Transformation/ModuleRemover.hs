@@ -12,7 +12,6 @@ module Core.Transformation.ModuleRemover where
   import Control.Monad.Extra
   import Data.Either
   import Core.Checker.Substitution
-  import Debug.Trace
 
   type Environment = M.Map (Annoted String Type) String
   data ModuleState = ModuleState {
@@ -53,12 +52,10 @@ module Core.Transformation.ModuleRemover where
     x <- findM (\((_ :@ t'), _) -> isRight <$> mguM t t') =<< (M.toList <$> gets types)
     case x of
       Just (_ :@ t', replacement) -> do
-        traceShowM (t, t')
         s <- mguM t' t
         case s of
           Right s' -> do
             let t'' = apply s' (buildFun (getAnnots t') (TId replacement))
-            traceShowM t''
             return t''
           Left _ -> return t
       Nothing -> return t
