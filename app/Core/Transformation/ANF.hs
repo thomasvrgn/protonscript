@@ -62,6 +62,10 @@ module Core.Transformation.ANF where
   anfExpression (EVariable n t c :>: pos) = ask >>= \env -> case lookup n env of
     Just n' -> return ([], EVariable n' t c :>: pos)
     Nothing -> return ([], EVariable n t c :>: pos)
+  anfExpression (ECall (EVariable n c t :>: p1) args t' :>: p2) = do
+    name <- freshName
+    (l1s, args') <- unzip <$> mapM anfExpression args
+    return $ (concat l1s ++ [(name :@ t', ECall (EVariable n c t :>: p1) args' t' :>: p2)], EVariable name t' [] :>: p2)
   anfExpression (ECall func args t :>: pos) = do
     (l1, func') <- anfExpression func
     (l2s, args') <- unzip <$> mapM anfExpression args
@@ -77,9 +81,14 @@ module Core.Transformation.ANF where
             SAssignment x e :>: pos') xs) lets
     let xs = concatMap (\(lets'', x) -> lets'' ++ [x]) (zip lets' exprs')
     return $ ([], EBlock xs :>: pos)
-  anfExpression (ELambda annots ret args body :>: pos) = do
-    (l, body') <- anfExpression body
-    return $ (l, ELambda annots ret args body' :>: pos)
+  anfExpression (ELambda annots ret args body t :>: pos) = do
+    name1 <- freshName
+    (lets1, body') <- anfExpression body
+    let lets' = map (\(x, e@(_ :>: pos')) ->
+            SAssignment x e :>: pos') lets1
+    return (
+      [(name1 :@ t, (ELambda annots ret args (EBlock (lets' ++ [SReturn body' :>: pos]) :>: pos) t :>: pos))],
+      EVariable name1 t [] :>: pos)
   anfExpression (EUnaryOp op expr :>: pos) = do
     (l, expr') <- anfExpression expr
     return $ (l, EUnaryOp op expr' :>: pos)
@@ -119,11 +128,11 @@ module Core.Transformation.ANF where
   anfExpression (ELiteral lit :>: pos) = return $ ([], ELiteral lit :>: pos)
   anfExpression (ESizeOf t :>: pos) = return $ ([], ESizeOf t :>: pos)
 
-  runANF :: Monad m => [Located (Toplevel Type)] -> m [Located (Toplevel Type)]
-  runANF xs = do
-    (res, _, _) <- runRWST (mapM anfToplevel xs) [] 0
+  runANF :: Monad m => [Located (Toplevel Type)] -> Int -> m (Int, [Located (Toplevel Type)])
+  runANF xs i = do
+    (res, c, _) <- runRWST (mapM anfToplevel xs) [] i
     let (lets, toplevels) = unzip res
     let lets' = map (\xs' -> map (\(x, e@(_ :>: pos')) ->
             TAssignment x e :>: pos') xs') lets
     let toplevels' = concatMap (\(lets'', x) -> lets'' ++ [x]) (zip lets' toplevels)
-    return toplevels'
+    return (c, toplevels')
