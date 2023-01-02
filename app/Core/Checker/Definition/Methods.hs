@@ -103,7 +103,7 @@ module Core.Checker.Definition.Methods where
   instance Types a => Types (Expression a) where
     free (EVariable n _ _) = S.singleton n
     free (ECall e args _) = free e `S.union` free args
-    free (ELambda _ _ args body) = free body S.\\ free args
+    free (ELambda _ _ args body _) = free body S.\\ free args
     free (EArrayLiteral e) = free e
     free (EArrayAccess e1 e2) = free e1 `S.union` free e2
     free (EStructureLiteral f) = free f
@@ -118,7 +118,7 @@ module Core.Checker.Definition.Methods where
     free _ = S.empty
     
     apply s (ECall n xs t) = ECall (apply s n) (apply s xs) (apply s t)
-    apply s (ELambda annots ty args b) = ELambda annots (apply s ty) (apply s args) (apply s b)
+    apply s (ELambda annots ty args b t) = ELambda annots (apply s ty) (apply s args) (apply s b) (apply s t)
     apply s (EVariable n t d) = EVariable n (apply s t) (apply s d)
     apply _ (ELiteral l) = ELiteral l
     apply s (EBinaryOp op e1 e2) = EBinaryOp op (apply s e1) (apply s e2)
