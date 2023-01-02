@@ -1,13 +1,4 @@
-import { malloc } from "./stdlib";
-interface List<T> {
-  head: T;
-  tail: Ref<List<T>>;
-}
-
-interface Closure<E, F> {
-  env: E;
-  func: F;
-}
+import { malloc, List } from "./stdlib";
 
 function map<T, U>(f: (x: T) => U, list: List<T>): List<U> {
   if (list.tail == null) {
@@ -25,12 +16,11 @@ function makeList<T>(head: T, tail: Ref<List<T>>): Ref<List<T>> {
   return list;
 }
 
-function test(x) {
-  return printf("%s ", x);
-}
-
 function main(): number {
-  let x = makeList("test", makeList("bruh", makeList("hello", null)));
-  map(test, *x);
+  let x = makeList(8, makeList(9, makeList(10, null)));
+  let add = (x, y) => x + y;
+  let sub = (x) => (y) => x - y;
+  map((x) => printf("%d ", add(x, sub(x)(1))), *x);
+  printf("%d\n", sub(5)(add(1, 2)));
   return 0;
 }
