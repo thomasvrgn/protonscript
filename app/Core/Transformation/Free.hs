@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 module Core.Transformation.Free where
   import qualified Data.Map as M
   import Core.Checker.Definition.Type
@@ -45,7 +46,7 @@ module Core.Transformation.Free where
   instance Free (Expression Type) where
     free (EVariable n t _) = M.singleton n t
     free (ECall e args _) = free e `M.union` free args
-    free (ELambda _ _ args body) = free body M.\\ free args
+    free (ELambda _ _ args body _) = free body M.\\ free args
     free (EArrayLiteral e) = free e
     free (EArrayAccess e1 e2) = free e1 `M.union` free e2
     free (EStructureLiteral f) = free f
@@ -56,5 +57,9 @@ module Core.Transformation.Free where
     free (EBinaryOp _ e1 e2) = free e1 `M.union` free e2
     free (EReference e) = free e
     free (EDereference e) = free e
-    free (EBlock es) = free es
+    free (EBlock es) = fst $ foldl (\(acc, excluded) -> \case
+      SAssignment (n :@ t) e :>: _ -> (acc `M.union` free e M.\\ M.singleton n t, excluded `M.union` M.singleton n t)
+      x -> (acc `M.union` free x M.\\ excluded, excluded)
+      ) (M.empty, M.empty) es
+    free (ELetIn n e1 e2) = (free e1 `M.union` free e2) M.\\ free n
     free _ = M.empty
