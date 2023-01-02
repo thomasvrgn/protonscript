@@ -294,7 +294,7 @@ module Core.Parser.Parser where
       (reserved "function" *> ((,,) <$> getGenerics <*> getArgs <*> (optionMaybe $ reservedOp ":" *> declaration)))
     body <- expression
     e <- getPosition
-    return $ ELambda generics ty args body :>: (s, e)
+    return $ ELambda generics ty args body Nothing :>: (s, e)
 
   eBlock :: Proton (Expression (Maybe Declaration))
   eBlock = do

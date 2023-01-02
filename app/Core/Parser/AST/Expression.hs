@@ -5,7 +5,7 @@ module Core.Parser.AST.Expression where
   import Core.Color
   
   data Annoted a b = a :@ b
-    deriving (Eq, Functor, Foldable)
+    deriving (Eq, Functor, Foldable, Ord)
 
   instance Traversable (Annoted a) where
     traverse f (a :@ b) = (a:@) <$> f b
@@ -103,7 +103,7 @@ module Core.Parser.AST.Expression where
     = EVariable String a [a]
     | ECall (Located (Expression a)) [Located (Expression a)] a
     | ELiteral Literal
-    | ELambda [String] a [Annoted String a] (Located (Expression a))
+    | ELambda [String] a [Annoted String a] (Located (Expression a)) a
     | EArrayLiteral [Located (Expression a)]
     | EStructureLiteral [(String, Located (Expression a))]
     | ECast a (Located (Expression a))
@@ -122,10 +122,10 @@ module Core.Parser.AST.Expression where
     deriving Eq
   
   instance Show a => Show (Expression a) where
-    show (EVariable name t' _) = "(" ++ show t' ++ ") " ++ bold name{- ++ showAnnots (map show t)-}
+    show (EVariable name _ _) = bold name{- ++ showAnnots (map show t)-}
     show (ECall f args _) = show f ++ "(" ++ intercalate ", " (map show args) ++ ")"
     show (ELiteral l) = show l
-    show (ELambda annots ret args body) = showAnnots annots ++ "(" ++ intercalate ", " (map show args) ++ "): " ++ show ret ++ " => " ++ show body
+    show (ELambda annots ret args body _) = showAnnots annots ++ "(" ++ intercalate ", " (map show args) ++ "): " ++ show ret ++ " => " ++ show body
     show (EArrayLiteral xs) = "[" ++ intercalate ", " (map show xs) ++ "]"
     show (EStructureLiteral xs) = "{ " ++ intercalate ", " (map (\(k, v) -> k ++ ": " ++ show v) xs) ++ " }"
     show (ECast t expr) = "(" ++ show t ++ ") " ++ show expr
