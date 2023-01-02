@@ -86,7 +86,7 @@ module Core.Transformation.Hoisting where
   hoistExpression (ECast t x :>: pos) = do
     x' <- hoistExpression x
     return $ ECast t x' :>: pos
-  hoistExpression (ELambda annots ret args body :>: pos) = do
+  hoistExpression (ELambda annots ret args body _ :>: pos) = do
     body' <- hoistExpression body
     name <- freshName
     tell [TFunction annots ret name args (case body' of
