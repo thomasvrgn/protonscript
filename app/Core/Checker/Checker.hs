@@ -110,7 +110,7 @@ module Core.Checker.Checker where
       Right s3 -> do
         return (apply s3 tv, s3 `compose` s2 `compose` s1, apply s3 $ ECall n1 args (apply s3 tv) :>: pos)
       Left x -> throwError (x, Nothing, pos)
-  inferE (ELambda annots ret args e :>: pos) = do
+  inferE (ELambda annots ret args e _ :>: pos) = do
     annots' <- mapM (const fresh) annots
     let map' = M.fromList $ zip annots annots'
     ret' <- case ret of
@@ -126,7 +126,7 @@ module Core.Checker.Checker where
     mgu c ret' t >>= \case
       Right s' -> do
         let s'' = s' `compose` s
-        return (apply s'' $ map snd args' :-> apply s'' ret', s'', ELambda annots ret' (zipWith (:@) (map fst args') (apply s'' $ map snd args')) (apply s'' (createCastReturn' ret' e')) :>: pos)
+        return (apply s'' $ map snd args' :-> apply s'' ret', s'', ELambda annots ret' (zipWith (:@) (map fst args') (apply s'' $ map snd args')) (apply s'' (createCastReturn' ret' e')) (apply s'' $ map snd args' :-> apply s'' ret') :>: pos)
       Left x -> throwError (x, Nothing, pos)
   inferE (ELiteral l :>: pos) = do
     t <- case l of
@@ -280,7 +280,12 @@ module Core.Checker.Checker where
     (EBlock xs' :>: p1) -> EBlock (createCastReturn t xs') :>: p1
     _ -> xs
 
-  inferT ::  MonadType m => (String, Bool) -> Located (Toplevel (Maybe Declaration)) -> m (Type, Substitution, Located (Toplevel Type))
+  extractType :: Type -> String
+  extractType (TApp t1 _) = extractType t1
+  extractType (TId t) = t
+  extractType _ = ""
+
+  inferT :: MonadType m => (String, Bool) -> Located (Toplevel (Maybe Declaration)) -> m (Type, Substitution, Located (Toplevel Type))
   inferT (_, p) (TAssignment (name :@ ty) value :>: pos) = do
     (t, s, n, v) <- inferVariable True p name ty value pos
     return (t, s, TAssignment n v :>: pos)
@@ -360,8 +365,23 @@ module Core.Checker.Checker where
             case xs of
               Left err -> throwError err
               Right (TypeState _ _ (env2, c'), xs') -> do
-                let env3 = filterEnvIsPublic env2
-                let c2 = filterEnvIsPublic c'
+                let (env3, c2) = case meta of
+                      INone -> (filterEnvIsPublic env2, filterEnvIsPublic c')
+                      IOnly funs -> 
+                        (M.filterWithKey (\k _ -> k `elem` funs) $ filterEnvIsPublic env2, M.filterWithKey (\k _ -> extractType k `elem` funs) $ filterEnvIsPublic c')
+                      _ -> error "Not implemented yet"
+                
+                case meta of
+                  IOnly funs -> do
+                    forM_ funs $ \f -> do
+                      let t = M.lookup f env2
+                      case t of
+                        Nothing -> if length (M.filterWithKey (\k _ -> extractType k `elem` funs) c2) == 0
+                          then throwError ("Function " ++ f ++ " not found in " ++ path', Nothing, pos)
+                          else return ()
+                        Just _ -> return ()
+                  _ -> return ()
+
                 let env4 = M.union env' env3
                 let c3 = M.union c c2
                 modify $ \env -> env { env = (env4, c3), modules = M.insert path' (Module path' xs') (modules env) }
