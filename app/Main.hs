@@ -20,7 +20,8 @@ module Main where
   import Core.Parser.AST.Literal
   import Core.Parser.AST.Expression
   import Data.List
-  import qualified Data.Map as M
+  import Core.Transformation.ForwardRemover
+  import Core.Transformation.ModuleRemover
 
   compileModule :: [Located (Toplevel Type)] -> String -> IO String
   compileModule xs path = do
@@ -43,14 +44,18 @@ module Main where
             res <- runInfer (takeDirectory file, True) ast'
             case res of
               Left err -> printError err "While typechecking the program"
-              Right (TypeState _ modules _, res') -> do
-                res' <- runANF $ res'
-                res' <- runMono res'
+              Right (TypeState c modules _, res') -> do
+                res' <- bundle res' modules
+                (anfC, res') <- runANF res' 0
+                mapM_ print res'
+                (interfaces, res') <- runClosureConversion res' c
+                res' <- runHoisting res'
+                (_, res') <- runANF (reverse interfaces ++ res') anfC
+                res'' <- runMono res'
+                let res' = nub $ concatMap (`rearrange` res'') res''
                 path <- compileModule res' file
-                mods <- M.elems <$> mapM (\(Module path mod) -> compileModule mod path) modules
-                print mods
                 findExecutable "clang" >>= \case
                   Nothing -> putStrLn "Clang not found, skipping compilation"
                   Just clang -> do
-                    callCommand $ clang ++ " " ++ path ++ " " ++ intercalate " " mods ++ " -w -o " ++ (file -<.> "out")
+                    callCommand $ clang ++ " " ++ path ++ " -w -o " ++ (file -<.> "out")
       _ -> putStrLn "Usage: proton compile <file>"
