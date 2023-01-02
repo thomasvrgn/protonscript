@@ -4,8 +4,6 @@ module Core.Compiler.Compiler where
   import Core.Checker.Definition.Type
   import Data.List
   import Control.Monad.State
-  import Core.Transformation.Free
-  import qualified Data.Map as M
 
   type CType = String
   type IR f = Located (f CType)
